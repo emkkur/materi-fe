@@ -1,5 +1,9 @@
 # Materi Documents Editor - Development Session Export
 
+
+Note: These summaries were generated from antigravity. Antigravity does not have a direct export feature, so I had the agent summarize the chat history and save it to a file. 
+
+
 This document contains a comprehensive summary of the development session for the **Materi Documents Editor**.
 
 ## Session Overview
