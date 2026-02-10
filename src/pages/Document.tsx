@@ -1,8 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
+
+import BackSvg from '../assets/back.svg?react';
 import Button from '../components/Button';
 import { useToast } from '../components/ToastContext';
 import { getDocument, updateDocument, createDocument, deleteDocument } from '../api';
+import DeleteConfirmationModal from '../components/DeleteConfirmationModal';
+
 import SlateEditor, { type SlateEditorRef } from './SlateEditor';
 
 export const Document = () => {
@@ -113,7 +117,9 @@ export const Document = () => {
       {/* Header */}
       <div className="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10 shadow-sm">
         <div className="flex items-center gap-4 flex-1">
-          <Button onClick={() => navigate('/')} variant="secondary">Back</Button>
+          <Button onClick={() => navigate('/')} variant="secondary">
+            <BackSvg width={20} height={20} fill='#ffffff' />
+          </Button>
           <input
             type="text"
             value={title}
@@ -169,34 +175,13 @@ export const Document = () => {
         </div>
       </div>
 
-      {/* Delete Confirmation Modal */}
-      {showDeleteModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 transform animate-in zoom-in-95 duration-200">
-            <h3 className="text-xl font-semibold text-gray-900 mb-2">Delete Document?</h3>
-            <p className="text-gray-600 mb-6">
-              This action cannot be undone. All content in "{title}" will be permanently removed.
-            </p>
-            <div className="flex justify-end gap-3">
-              <Button 
-                variant="secondary" 
-                onClick={() => setShowDeleteModal(false)}
-                disabled={loading}
-              >
-                Cancel
-              </Button>
-              <Button 
-                variant="primary" 
-                onClick={handleDeleteConfirmed}
-                disabled={loading}
-                className="bg-red-600 hover:bg-red-700 border-red-600 focus:ring-red-500"
-              >
-                {loading ? 'Deleting...' : 'Delete Permanently'}
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+      <DeleteConfirmationModal 
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        onConfirm={handleDeleteConfirmed}
+        title={title}
+        loading={loading}
+      />
     </div>
   );
 };
