@@ -1,7 +1,12 @@
-import React, { useCallback, useEffect, useState, useRef, useImperativeHandle, forwardRef } from 'react';
-import { createEditor, Editor, Transforms, type BaseEditor, type Descendant } from 'slate';
+import React, { useCallback, useState, useRef, useImperativeHandle, forwardRef } from 'react';
+import { createEditor, type BaseEditor, type Descendant } from 'slate';
 import { Slate, Editable, withReact, ReactEditor } from 'slate-react';
+
 import { withHistory, HistoryEditor } from 'slate-history';
+import { PAGE_WIDTH, PAGE_HEIGHT, PAGE_MARGIN } from '../constants';
+import { usePagination } from '../usePagination';
+
+
 
 // Define custom types
 export type ParagraphElement = { type: 'paragraph'; children: CustomText[] };
@@ -27,10 +32,8 @@ export interface SlateEditorRef {
   redo: () => void;
 }
 
-const PAGE_HEIGHT = 1056; // 11 inches at 96 DPI
-const PAGE_MARGIN = 50;
-
 const SlateEditor = forwardRef<SlateEditorRef, SlateEditorProps>(({ initialContent, onChange }, ref) => {
+
   const [editor] = useState(() => withHistory(withReact(createEditor())));
   
   // Clean initial state handling
@@ -100,64 +103,9 @@ const SlateEditor = forwardRef<SlateEditorRef, SlateEditorProps>(({ initialConte
   };
 
   // Pagination Logic
-  useEffect(() => {
-    if (!editor) return;
+  usePagination(editor, value);
 
-    // Use a timeout to allow the render to complete and paint before measuring
-    const timeoutId = setTimeout(() => {
-      Editor.withoutNormalizing(editor, () => {
-        const pages = editor.children;
-        if (!pages) return;
 
-        for (let i = 0; i < pages.length; i++) {
-          const pageNode = pages[i];
-          const pagePath = [i];
-          
-          try {
-            const domNode = ReactEditor.toDOMNode(editor, pageNode);
-            
-            if (domNode.scrollHeight > PAGE_HEIGHT) {
-              if (!('type' in pageNode) || pageNode.type !== 'page') continue;
-
-              const childrenCount = pageNode.children.length;
-              
-              if (childrenCount > 0) {
-                // Prevent infinite loop: If there's only one child and it overflows,
-                // we can't move it to the next page because it will likely overflow there too.
-                // For now, we allow it to overflow the current page.
-                if (childrenCount < 2) return;
-
-                const lastChildPath = [...pagePath, childrenCount - 1];
-                const hasNextPage = i + 1 < pages.length;
-                
-                if (hasNextPage) {
-                  Transforms.moveNodes(editor, {
-                    at: lastChildPath,
-                    to: [i + 1, 0]
-                  });
-                } else {
-                  const newPage: PageElement = {
-                    type: 'page',
-                    children: []
-                  };
-                  Transforms.insertNodes(editor, newPage, { at: [i + 1] });
-                  Transforms.moveNodes(editor, {
-                    at: lastChildPath,
-                    to: [i + 1, 0]
-                  });
-                }
-                return; // Handle one overflow per cycle
-              }
-            }
-          } catch (e) {
-            continue;
-          }
-        }
-      });
-    }, 10); // Small delay to unblock thread
-
-    return () => clearTimeout(timeoutId);
-  }, [value, editor]);
 
   return (
     <div className="flex flex-col items-center bg-gray-100 min-h-screen py-8">
@@ -205,12 +153,13 @@ const PageElement = React.forwardRef(({ attributes, children, pageIndex }: any, 
       ref={setRef}
       className="bg-white shadow-lg mx-auto mb-8 relative group"
       style={{
-        width: '816px',
+        width: `${PAGE_WIDTH}px`,
         minHeight: `${PAGE_HEIGHT}px`,
         padding: `${PAGE_MARGIN}px`,
         boxSizing: 'border-box'
       }}
     >
+
       {children}
       
       {/* Page number */}
