@@ -1,14 +1,17 @@
 import { Routes, Route } from 'react-router';
 import Home from './pages/Home';
 import Document from './pages/Document';
-import './App.css';
+import { ToastProvider } from './components/ToastContext';
 
 function App() {
   return (
-    <Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/document/:documentId" element={<Document />} />
-    </Routes>
+    <ToastProvider>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/document" element={<Document />} />
+        <Route path="/document/:documentId" element={<Document />} />
+      </Routes>
+    </ToastProvider>
   );
 }
 
