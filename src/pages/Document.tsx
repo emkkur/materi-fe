@@ -1,33 +1,27 @@
-import { useState, useEffect, type FC, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { createDocument, getDocument, updateDocument, type DocumentCreate, type DocumentUpdate } from '../api';
-import { useToast } from '../components/ToastContext';
 import Button from '../components/Button';
+import { useToast } from '../components/ToastContext';
+import { getDocument, updateDocument, createDocument, deleteDocument } from '../api';
+import SlateEditor, { type SlateEditorRef } from './SlateEditor';
 
-// Centralised layout constants [cite: 19, 32]
-const PAGE_WIDTH_PX = 794; 
-const PAGE_HEIGHT_PX = 1123;
-const MARGIN_PX = 50;
-const CONTENT_HEIGHT_PX = PAGE_HEIGHT_PX - (MARGIN_PX * 2);
-const CONTENT_WIDTH_PX = PAGE_WIDTH_PX - (MARGIN_PX * 2);
-
-const Document: FC = () => {
+export const Document = () => {
   const { documentId } = useParams();
   const navigate = useNavigate();
   const { showToast } = useToast();
   
-  const [title, setTitle] = useState('Untitled Document');
   const [content, setContent] = useState('');
-  const [originalTitle, setOriginalTitle] = useState('Untitled Document');
+  const [title, setTitle] = useState('Untitled Document');
   const [originalContent, setOriginalContent] = useState('');
-  const [pages, setPages] = useState<string[]>(['']);
+  const [originalTitle, setOriginalTitle] = useState('Untitled Document');
   const [loading, setLoading] = useState(false);
+  const [isDirty, setIsDirty] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  
-  const measureRef = useRef<HTMLDivElement>(null);
-  const textareaRefs = useRef<(HTMLTextAreaElement | null)[]>([]);
+  // Ref to access Slate editor methods (undo/redo)
+  const editorRef = useRef<SlateEditorRef>(null);
 
-  // Load document on mount or ID change
+  // Load document
   useEffect(() => {
     const loadDoc = async () => {
       if (documentId && documentId !== 'new') {
@@ -39,15 +33,13 @@ const Document: FC = () => {
           setOriginalTitle(doc.title);
           setOriginalContent(doc.content);
         } catch (error) {
-          console.error("Failed to load document", error);
-          showToast("Failed to load document. Check console for details.", 'error');
+          showToast("Failed to load document", 'error');
         } finally {
           setLoading(false);
         }
       } else {
-        // Reset for new document
         setTitle('Untitled Document');
-        setContent('');
+        setContent(''); // Will be handled by SlateEditor's default
         setOriginalTitle('Untitled Document');
         setOriginalContent('');
       }
@@ -55,243 +47,156 @@ const Document: FC = () => {
     loadDoc();
   }, [documentId, showToast]);
 
-  // Pagination logic: Dynamic measurement
+  // Dirty check
   useEffect(() => {
-    if (!measureRef.current) return;
-
-    const measureTextHeight = (text: string): number => {
-        if (!measureRef.current) return 0;
-        measureRef.current.innerText = text;
-        // Append a zero-width space to force height calculation for trailing newlines if needed,
-        // but innerText usually handles newlines. ScrollHeight is reliable.
-        return measureRef.current.scrollHeight;
-    };
-
-    const findSplitIndex = (text: string): number => {
-        // Optimization: check if whole text fits
-        if (measureTextHeight(text) <= CONTENT_HEIGHT_PX) {
-            return text.length;
-        }
-
-        // Binary search for max fit
-        let low = 0;
-        let high = text.length;
-        let best = 0;
-
-        while (low <= high) {
-            const mid = Math.floor((low + high) / 2);
-            // We want to correct binary search to find the boundary
-            // where text[0..mid] fits, but text[0..mid+1] doesn't (conceptually)
-            
-            // Try mid
-            const sub = text.slice(0, mid);
-            if (measureTextHeight(sub) <= CONTENT_HEIGHT_PX) {
-                best = mid;
-                low = mid + 1;
-            } else {
-                high = mid - 1;
-            }
-        }
-
-        // Backtrack to last whitespace to avoid splitting words
-        // Only backtrack if we are not at end (which we aren't, because of the first check)
-        if (best < text.length) {
-            let spaceIndex = best;
-            // Backtrack carefully
-            while (spaceIndex > 0 && !/\s/.test(text[spaceIndex])) {
-                spaceIndex--;
-            }
-            // If we found a space and didn't backtrack the whole way (giant word)
-            if (spaceIndex > 0) {
-                return spaceIndex + 1; // Include the space on the current page? 
-                // Usually nicer to leave space at end of line.
-            }
-        }
-        
-        return best;
-    };
-
-    const paginate = () => {
-        const newPages: string[] = [];
-        let remaining = content;
-        
-        // Safety break to prevent infinite loops if something goes wrong
-        let iterations = 0;
-        const MAX_PAGES = 1000; 
-
-        while (remaining.length > 0 && iterations < MAX_PAGES) {
-            const split = findSplitIndex(remaining);
-            if (split === 0) {
-                // Should not happen if logic is correct, but prevents infinite loop
-                // Force split at 1 char if stuck
-                newPages.push(remaining.slice(0, 1));
-                remaining = remaining.slice(1);
-            } else {
-                newPages.push(remaining.slice(0, split));
-                remaining = remaining.slice(split);
-            }
-            iterations++;
-        }
-        
-        if (newPages.length === 0) newPages.push('');
-        setPages(newPages);
-    };
-
-    // Debounce or just run? For now, just run.
-    paginate();
-
-  }, [content]);
-
-  // Handle keyboard navigation between pages
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>, index: number) => {
-    const textarea = e.currentTarget;
-    const { selectionStart, selectionEnd, value } = textarea;
-
-    // Only navigate if cursor is not a selection range
-    if (selectionStart !== selectionEnd) return;
-
-    if (e.key === 'ArrowDown' || e.key === 'ArrowRight') {
-      // Check if we are at the end of the current page content
-      if (selectionStart === value.length) {
-        // Move to next page if it exists
-        if (index < pages.length - 1) {
-          e.preventDefault();
-          const nextPageTextarea = textareaRefs.current[index + 1];
-          if (nextPageTextarea) {
-            nextPageTextarea.focus();
-            nextPageTextarea.setSelectionRange(0, 0);
-          }
-        }
-      }
-    } else if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') {
-      // Check if we are at the start of the current page content
-      if (selectionStart === 0) {
-        // Move to previous page if it exists
-        if (index > 0) {
-          e.preventDefault();
-          const prevPageTextarea = textareaRefs.current[index - 1];
-          if (prevPageTextarea) {
-            prevPageTextarea.focus();
-            const length = prevPageTextarea.value.length;
-            prevPageTextarea.setSelectionRange(length, length);
-          }
-        }
-      }
-    }
-  };
-
-  const handlePageEdit = (pageIndex: number, newPageText: string) => {
-    // Reconstruct content based on CURRENT page boundaries
-    let prefix = '';
-    for (let i = 0; i < pageIndex; i++) {
-        prefix += pages[i];
-    }
-    
-    // We replace the current page's content, but we need to know what the REST of the content was.
-    // The current page[pageIndex] corresponds to a slice of the OLD content.
-    // We can just calculate the suffix start index.
-    
-    // Suffix starts after the current page's old content.
-    const currentOldLength = pages[pageIndex].length;
-    const suffixStart = prefix.length + currentOldLength;
-    const suffix = content.slice(suffixStart);
-    
-    setContent(prefix + newPageText + suffix);
-  };
-
-  const isNew = !documentId || documentId === 'new';
-  const isDirty = isNew 
-    ? (title.trim().length > 0 || content.trim().length > 0) // New doc: enable if *anything* is typed (whitespace allowed per user req, actually user said "can be whitespace", so just length check)
-    : (title !== originalTitle || content !== originalContent); // Existing: enable if changed
+    const isContentChanged = content !== originalContent;
+    const isTitleChanged = title !== originalTitle;
+    setIsDirty(isContentChanged || isTitleChanged);
+  }, [content, originalContent, title, originalTitle]);
 
   const handleSave = async () => {
     try {
+      const payload = { title, content };
+      
       if (documentId && documentId !== 'new') {
-        const update: DocumentUpdate = { title, content };
-        await updateDocument(documentId, update);
-        setOriginalTitle(title);
-        setOriginalContent(content);
-        showToast('Saved!', 'success');
+        await updateDocument(documentId, payload);
       } else {
-        const create: DocumentCreate = { title, content };
-        const newDoc = await createDocument(create);
-        navigate(`/document/${newDoc.id}`, { replace: true }); // Use replace to avoid back button issues? or just navigate.
-        // After navigate, the effect will run and load the doc, setting original state. 
-        // But for perceived speed, we can set it here too if we didn't navigate. 
-        // Actually navigate causes unmount/remount usually or at least effect trigger.
-        showToast('Document created!', 'success');
+        const newDoc = await createDocument(payload);
+        navigate(`/document/${newDoc.id}`, { replace: true });
       }
+      setOriginalTitle(title);
+      setOriginalContent(content);
+      showToast('Saved!', 'success');
     } catch (error) {
-      console.error("Failed to save", error);
-      showToast("Failed to save.", 'error');
+      showToast("Failed to save", 'error');
     }
   };
 
+  const undo = () => {
+    if (editorRef.current) {
+      editorRef.current.undo();
+    }
+  };
+
+  const redo = () => {
+    if (editorRef.current) {
+      editorRef.current.redo();
+    }
+  };
+
+  const handleDeleteConfirmed = async () => {
+    if (!documentId || documentId === 'new') return;
+    
+    try {
+      setLoading(true);
+      await deleteDocument(documentId);
+      showToast('Document deleted', 'success');
+      navigate('/');
+    } catch (error) {
+      showToast('Failed to delete document', 'error');
+    } finally {
+      setLoading(false);
+      setShowDeleteModal(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-gray-100 min-h-screen w-screen p-5 flex flex-col justify-center items-center">
-      {/* Hidden Layout Measurement Div */}
-      <div 
-        ref={measureRef}
-        className="invisible absolute -z-50 whitespace-pre-wrap wrap-break-word text-base leading-normal font-mono"
-        style={{
-            width: `${CONTENT_WIDTH_PX}px`,
-        }}
-      />
-
-      {/* UI Controls [cite: 43] */}
-      <header className="mb-5 flex gap-2.5 items-center justify-between" style={{ width: `${PAGE_WIDTH_PX}px` }}>
-        <Button 
-            onClick={() => navigate('/')} 
-            variant='secondary'
-        >
-            Back to Home
-        </Button>
-        <div className="flex gap-2.5 items-center">
-          <input 
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              className="p-2 w-[200px] font-bold border border-gray-300 rounded"
-              placeholder="Document Title"
+    <div className="flex flex-col h-screen w-screen bg-gray-100">
+      {/* Header */}
+      <div className="bg-white border-b px-4 py-3 flex items-center justify-between sticky top-0 z-10 shadow-sm">
+        <div className="flex items-center gap-4 flex-1">
+          <Button onClick={() => navigate('/')} variant="secondary">Back</Button>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            className="font-medium text-lg text-black px-2 py-1 rounded hover:bg-gray-50 focus:bg-white focus:ring-2 focus:ring-blue-500 focus:outline-none transition-all flex-1 max-w-md"
+            placeholder="Untitled Document"
           />
-          <Button 
-              onClick={handleSave} 
-              disabled={loading || !isDirty}
-              variant='primary'
-              title={!isDirty ? "No changes to save" : ""}
-          >
+        </div>
+        
+        <div className="flex gap-2 items-center">
+          <div className="flex gap-1 mr-4 border-r pr-4 border-gray-100">
+            <Button 
+              onClick={undo} 
+              variant="secondary"
+              className="px-2 py-1 text-xs"
+            >
+              Undo
+            </Button>
+            <Button 
+              onClick={redo} 
+              variant="secondary"
+              className="px-2 py-1 text-xs"
+            >
+              Redo
+            </Button>
+          </div>
+          {documentId && documentId !== 'new' && (
+            <Button 
+              onClick={() => setShowDeleteModal(true)} 
+              variant="secondary"
+              className="px-3 py-1 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 border-red-100"
+            >
+              Delete
+            </Button>
+          )}
+          <Button onClick={handleSave} disabled={loading || !isDirty} variant="primary">
             {loading ? 'Saving...' : 'Save'}
           </Button>
         </div>
-      </header>
+      </div>
 
-      {/* Page Containers [cite: 28, 33] */}
-      <main className="flex flex-col items-center gap-5">
-        {loading && <p className="text-gray-500">Loading content...</p>}
-        {!loading && pages.map((pageText, index) => (
-          <div 
-            key={index} 
-            className="bg-white shadow-md relative flex flex-col"
-            style={{
-              width: `${PAGE_WIDTH_PX}px`,
-              height: `${PAGE_HEIGHT_PX}px`,
-              padding: `${MARGIN_PX}px`,
-            }}
-          >
-            <textarea
-              ref={(el) => { textareaRefs.current[index] = el; }}
-              value={pageText}
-              onChange={(e) => handlePageEdit(index, e.target.value)} // Live editing [cite: 7, 35]
-              onKeyDown={(e) => handleKeyDown(e, index)}
-              className="w-full h-full border-none resize-none outline-none text-base leading-normal font-mono p-0 overflow-hidden"
+      {/* Editor Area */}
+      <div className="flex-1 overflow-auto relative">
+        <div className="min-h-full py-8">
+          {!loading && (
+            <SlateEditor 
+                key={documentId} // Force remount when switching docs
+                ref={editorRef}
+                initialContent={content} 
+                onChange={setContent} 
             />
-            {/* Live page numbers  */}
-            <div className="absolute bottom-2.5 w-full text-center left-0 text-gray-400 text-sm pointer-events-none">
-              Page {index + 1} of {pages.length}
+          )}
+        </div>
+      </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl max-w-md w-full p-6 transform animate-in zoom-in-95 duration-200">
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">Delete Document?</h3>
+            <p className="text-gray-600 mb-6">
+              This action cannot be undone. All content in "{title}" will be permanently removed.
+            </p>
+            <div className="flex justify-end gap-3">
+              <Button 
+                variant="secondary" 
+                onClick={() => setShowDeleteModal(false)}
+                disabled={loading}
+              >
+                Cancel
+              </Button>
+              <Button 
+                variant="primary" 
+                onClick={handleDeleteConfirmed}
+                disabled={loading}
+                className="bg-red-600 hover:bg-red-700 border-red-600 focus:ring-red-500"
+              >
+                {loading ? 'Deleting...' : 'Delete Permanently'}
+              </Button>
             </div>
           </div>
-        ))}
-      </main>
+        </div>
+      )}
     </div>
   );
 };
