@@ -10,6 +10,7 @@ export const usePagination = (editor: Editor, value: any) => {
 
     const timeoutId = setTimeout(() => {
       Editor.withoutNormalizing(editor, () => {
+        console.log(editor)
         const pages = editor.children;
         if (!pages) return;
 
@@ -146,30 +147,6 @@ export const usePagination = (editor: Editor, value: any) => {
                  } catch (e) {
                      // Error
                  }
-              }
-
-              // Fallback: Default generic move logic for non-splittable or not-yet-processed items
-              if (childrenCount > 1) {
-                const movePath = [...pagePath, childrenCount - 1];
-                const hasNextPage = i + 1 < pages.length;
-                
-                if (hasNextPage) {
-                  Transforms.moveNodes(editor, {
-                    at: movePath,
-                    to: [i + 1, 0]
-                  });
-                } else {
-                  const newPage: PageElement = {
-                    type: 'page',
-                    children: []
-                  };
-                  Transforms.insertNodes(editor, newPage, { at: [i + 1] });
-                  Transforms.moveNodes(editor, {
-                    at: movePath,
-                    to: [i + 1, 0]
-                  });
-                }
-                return;
               }
             }
           } catch (e) {
